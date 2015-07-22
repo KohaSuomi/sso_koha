@@ -1,0 +1,14 @@
+<table>
+  <tr>
+    <td>Koha auth script url</td>
+    <td>
+<%= text_field_tag 'settings[koha_auth_script_url]', @settings['koha_auth_script_url'], :size => 60 %>
+    </td>
+  </tr>
+  <tr>
+    <td>Login redirect url</td>
+    <td>
+<%= text_field_tag 'settings[login_redirect_url]', @settings['login_redirect_url'], :size => 60 %>
+    </td>
+  </tr>
+</table>

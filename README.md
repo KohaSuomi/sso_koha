@@ -11,3 +11,9 @@ insert into auth_sources values( null, 'AuthSourceKoha', 'Koha', 'renki.vaarakir
 
 * redmineSSOAuthCheck: this file resides in your kohaclone-folder.
 * auth_source_koha.rb: this file is loaded by Redmine core automatically and needs to reside in redmine/app/models -folder (i.e. not in the plugins-folder)
+
+
+Configuration options (under /settings/plugin/sso_koha in Redmine):
+
+* Koha auth script url: this is the url of the redmineSSOAuthCheck -script.
+* Login redirect url: this is the url you want to redirect users succesfully authenticating through Koha.

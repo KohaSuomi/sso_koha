@@ -21,6 +21,7 @@ require 'net/http'
 require 'net/https'
 require 'uri'
 require 'json'
+require 'openssl'
 
 # Subclass AuthSource
 class AuthSourceKoha < AuthSource
@@ -33,41 +34,78 @@ class AuthSourceKoha < AuthSource
   # +password+ : what user entered for their password
   def authenticate(login, password)
     return nil if (login.blank? || password.blank?)
-    uristring = Setting.plugin_sso_koha['koha_auth_script_url']
-#    uristring = 'http://kohapreprod3:8080/cgi-bin/koha/svc/OPLIB/redmineSSOAuthCheck'
-    uri = URI.parse(uristring)
-    http = Net::HTTP.new(uri.host, uri.port)
-#    http.use_ssl = true
-#    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-    request = Net::HTTP::Post.new(uri.request_uri)
-    request.set_form_data({
-      :kohauser => login,
-      :kohasessionid => password
-      })
-    response = http.request(request)
-    body = JSON.parse(response.body)
-#    logger.debug(body)
-    return nil if body.key?('badsessionid') || body.key?('paramsmissing')
 
-#    if AuthSource.find_by_name('Koha').nil?
-#      as = AuthSource.new {
-#        |as| as.type = 'AuthSourceKoha', as.name = 'Koha',
-#        as.host = 'renki.vaarakirjastot.fi', port = 3306, as.account = 'dbuser',
-#        as.password = 'dbpass', as.base_dn = 'mysql:dbname', as.attr_login = 'name',
-#        as.attr_firstname = 'firstName', as.attr_lastname = 'lastName',
-#        as.attr_mail = 'email', as.onthefly_register = 1, as.tls = 0,
-#        as.filter = nil, as.timeout = nil
-#      }
-#      as.save
-#    end
+    password_parts = password.split('@')
+    login_parts = login.split('@')
 
-    retVal = {  :firstname => body['firstname'],
-                :lastname => body['surname'],
-                :mail => body['emailaddress'],
+    # The password field must be like 'kohacgisessionid@fullhost'
+    return nil if (password_parts[0].length === 0 || password_parts[1].length === 0 || login_parts[0].length === 0 || login_parts[1].length === 0)
+
+    login_parts_userid = login_parts[0]
+    login_parts_host_short = login_parts[1]
+    password_parts_session_id = password_parts[0]
+    password_parts_host_full = password_parts[1]
+
+    uristring = password_parts_host_full
+    userid = 'redmine'
+    sessionid = password_parts_session_id
+    koha_api_key = Redmine::Configuration['koha_api_key_' + login_parts_host_short]
+
+    # The api key for this koha server is missing.
+    return nil unless koha_api_key
+
+    response = get_koha_user(:uristring => uristring,
+                              :userid => userid,
+                              :sessionid => sessionid,
+                              :apikey => koha_api_key)
+
+
+
+    # Anything except '200' from the api means a failed call.
+    return nil unless response.code == '200'
+
+    koha_user = JSON.parse(response.body)
+
+    auth_info = {
+                :firstname => koha_user['firstname'],
+                :lastname => koha_user['lastname'],
+                :mail => koha_user['mail'],
                 :auth_source_id => self.id
              } if(onthefly_register?)
-    return retVal
+    return auth_info if auth_info
+
   end
+
+
+  # Does a Koha REST-API-call to test whether the given Koha session was valid
+  # and returns the http response object. See
+  def rest_api_call(settings = {})
+
+    userid = settings['userid']
+    apikey = settings['apikey']
+    uristring = settings['uristring']
+    sessionid = settings['sessionid']
+
+    http_verb = 'GET'
+    date = DateTime.now
+    digest = OpenSSL::Digest.new('sha256')
+    message = http_verb + ' ' + userid + ' ' + date.to_s
+    hmac = OpenSSL::HMAC.hexdigest(digest, apikey, message)
+    auth_header = 'Koha ' + userid + ':' + hmac.to_s
+
+    uri = URI('http://' + uristring + '/v1/auth/session')
+    http = Net::HTTP.new(uri.host, uri.port)
+    request = Net::HTTP::Get.new(uri.path)
+    request.add_field('X-Koha-Date', date)
+    request.add_field('Authorization', auth_header)
+    request.add_field('Cache-Control', 'no-cache')
+    request.add_field('sessionid', sessionid)
+
+    return http.request(request)
+
+  end
+
+  private :get_koha_user
 
   def auth_method_name
     'Koha'

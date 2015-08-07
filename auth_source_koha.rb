@@ -105,7 +105,7 @@ class AuthSourceKoha < AuthSource
 
   end
 
-  private :get_koha_user
+  private :rest_api_call
 
   def auth_method_name
     'Koha'

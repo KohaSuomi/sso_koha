@@ -13,8 +13,6 @@ Redmine::Plugin.register :sso_koha do
   version '0.1.0'
   url 'http://example.com/path/to/plugin'
   author_url 'vaarakirjastot.fi'
-  settings :default => {'koha_auth_script_location' => '/svc/OPLIB/redmineSSOAuthCheck',
-                        'login_redirect_url' => '/projects/fbox',
-                        'use_ssl' => 'yes'},
+  settings :default => {'login_redirect_url' => '/projects/fbox'},
            :partial => 'settings/sso_koha_settings'
 end

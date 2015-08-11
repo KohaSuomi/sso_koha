@@ -1,7 +1,9 @@
 Rails.application.config.to_prepare do
   require_dependency 'patches/account_controller_sso_patch'
+  require_dependency 'patches/users_controller_sso_patch'
   require_dependency 'patches/user_patch'
   require_dependency 'hooks/controller_account_hook'
+  require_dependency 'hooks/my_account_view_hook'
 end
 
 require 'redmine'

@@ -12,6 +12,8 @@ module SSOKoha
 
           after_create :set_kohasuomi_prefs
 
+          belongs_to :auth_organization, :class_name => 'AuthOrganization', :dependent => :destroy, :inverse_of => :user
+
         end
 
       end

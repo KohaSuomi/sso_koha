@@ -25,7 +25,6 @@ require 'openssl'
 
 # Subclass AuthSource
 class AuthSourceKoha < AuthSource
-
   # authentication() implementation
   # - Redmine will call this method, passing the login and password entered
   #   on the Sign In form.
@@ -50,12 +49,14 @@ class AuthSourceKoha < AuthSource
     userid = 'redmine'
     sessionid = password_parts_session_id
     koha_api_key = Redmine::Configuration['koha_api_key_' + login_parts_host_short]
+    rest_path = '/v1/auth/session'
 
     # The api key for this koha server is missing.
     return nil unless koha_api_key
 
     response = rest_api_call(:uristring => uristring, :userid => userid,
-                             :sessionid => sessionid, :apikey => koha_api_key)
+                             :sessionid => sessionid, :apikey => koha_api_key,
+                             :rest_path => rest_path)
 
 
 
@@ -77,7 +78,7 @@ class AuthSourceKoha < AuthSource
     auth_info = {
                 :firstname => koha_user['firstname'],
                 :lastname => koha_user['lastname'],
-                :mail => koha_user['mail'],
+                :mail => koha_user['email'],
                 :auth_organization_id => auth_org.id,
                 :auth_source_id => self.id
              } if(onthefly_register?)
@@ -93,6 +94,11 @@ class AuthSourceKoha < AuthSource
     @apikey = settings[:apikey]
     @uristring = settings[:uristring]
     @sessionid = settings[:sessionid]
+    @rest_path = settings[:rest_path]
+
+    @payload = {
+      :sessionid => @sessionid
+    }.to_json
 
     http_verb = 'GET'
     date = DateTime.now
@@ -101,25 +107,30 @@ class AuthSourceKoha < AuthSource
     hmac = OpenSSL::HMAC.hexdigest(digest, @apikey, message)
     auth_header = 'Koha ' + @userid + ':' + hmac.to_s
 
-    urihttp = URI('http://' + @uristring + '/v1/auth/session')
-    urihttps = URI('https://' + @uristring + '/v1/auth/session')
-    http = Net::HTTP.new(urihttps.host, urihttps.port)
-    request = Net::HTTP::Get.new(urihttps.path)
-    # Check for https
-    if request and request.instance_of? URI::HTTPS
+    uri = get_valid_uri('https', @uristring, @rest_path)
+    http = Net::HTTP.new(uri.host, uri.port)
+
+    # Attempt https and fall back to http if that fails.
+    begin
+      request = Net::HTTP::Get.new(uri.path)
       http.use_ssl = true
       http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-    else
-      http = Net::HTTP.new(urihttp.host, urihttp.port)
-      request = Net::HTTP::Get.new(urihttp.path)
+      request.body = @payload
+      request.add_field('X-Koha-Date', date)
+      request.add_field('Authorization', auth_header)
+      request.add_field('Cache-Control', 'no-cache')
+      http.request(request)
+    rescue Exception => e
+      logger.debug(e.inspect)
+      uri = get_valid_uri('http', @uristring, @rest_path)
+      http = Net::HTTP.new(uri.host, uri.port)
+      request = Net::HTTP::Get.new(uri.path)
+      request.body = @payload
+      request.add_field('X-Koha-Date', date)
+      request.add_field('Authorization', auth_header)
+      request.add_field('Cache-Control', 'no-cache')
+      http.request(request)
     end
-
-    request.add_field('X-Koha-Date', date)
-    request.add_field('Authorization', auth_header)
-    request.add_field('Cache-Control', 'no-cache')
-    request.add_field('sessionid', @sessionid)
-
-    return http.request(request)
 
   end
 
@@ -128,5 +139,12 @@ class AuthSourceKoha < AuthSource
   def auth_method_name
     'Koha'
   end
+
+  def get_valid_uri(protocol, uristring, rest_path)
+    @protocol = protocol + '://'
+    @uri = URI(@protocol + uristring + rest_path)
+    return @uri
+  end
+
 end
 

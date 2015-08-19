@@ -58,36 +58,44 @@ class AuthSourceKoha < AuthSource
                              :sessionid => sessionid, :apikey => koha_api_key,
                              :rest_path => rest_path)
 
-
-
     # Anything except '200' from the api means a failed call.
     return nil unless response.code == '200'
 
     koha_user = JSON.parse(response.body)
-    login_auth_org_name = login_parts_host_short
 
-    # Create a new auth organization with this user's hostname if it doesn't yet exist.
-    unless AuthOrganization.exists?(:name => login_auth_org_name)
-      auth_org = AuthOrganization.new
-      auth_org.name = login_parts_host_short
-      auth_org.save
+    # Support for voting organizations: if this feature is available from issue votes,
+    # create a new voting organization for this koha instance.
+    if VotingOrganization
+      unless VotingOrganization.exists?(:name => login_parts_host_short)
+        voting_org = VotingOrganization.new
+        voting_org.name = login_parts_host_short
+        if voting_org.save
+          logger.debug('New voting org created: ' + voting_org.name.to_s)
+        end
+      end
+      voting_org = VotingOrganization.where(:name => login_parts_host_short).take
+      auth_info = {
+        :firstname => koha_user['firstname'],
+        :lastname => koha_user['lastname'],
+        :mail => koha_user['email'],
+        :voting_organization_id => voting_org.id,
+        :auth_source_id => self.id
+      } if(onthefly_register?)
     end
 
-    auth_org = AuthOrganization.where(:name => login_auth_org_name).take
-
     auth_info = {
-                :firstname => koha_user['firstname'],
-                :lastname => koha_user['lastname'],
-                :mail => koha_user['email'],
-                :auth_organization_id => auth_org.id,
-                :auth_source_id => self.id
-             } if(onthefly_register?)
-    return auth_info if auth_info
+      :firstname => koha_user['firstname'],
+      :lastname => koha_user['lastname'],
+      :mail => koha_user['email'],
+      :auth_source_id => self.id
+    } if(onthefly_register?)
+
+    auth_info ? auth_info : nil
 
   end
 
   # Does a Koha REST-API-call to test whether the given Koha session was valid
-  # and returns the http response object. See
+  # and returns the http response object.
   def rest_api_call(settings = {})
 
     @userid = settings[:userid]
@@ -99,6 +107,28 @@ class AuthSourceKoha < AuthSource
     @payload = {
       :sessionid => @sessionid
     }.to_json
+
+    # Authentication system explained:
+    #
+    # For authentication to succeed, the client have to send 2 HTTP headers:
+    # X-Koha-Date: the standard HTTP Date header complying to RFC 1123, simply wrapped to X-Koha-Date, since the w3-specification forbids setting the Date-header from javascript.
+    # Authorization: the standard HTTP Authorization header, see below for how it is constructed.
+
+    # Constructing the Authorization header
+
+    # You brand the authorization header with "Koha"
+    # Then you give the userid/cardnumber of the user authenticating.
+    # Then the hashed signature.
+
+    # Signature
+    #
+    # The signature is a HMAC-SHA256-HEX hash of several elements of the request, separated by spaces:
+    # HTTP method (uppercase)
+    # userid/cardnumber
+    # X-Koha-Date-header
+    # Signed with the Borrowers API key
+    # The server then tries to rebuild the signature with each of the user's API keys. If one matches the receivedsignature, then authentication is almost OK.
+    # To avoid requests to be replayed, the last request's X-Koha-Date-header is stored in database and the authentication succeeds only if the stored Date is lesser than the X-Koha-Date-header.
 
     http_verb = 'GET'
     date = DateTime.now
@@ -115,20 +145,14 @@ class AuthSourceKoha < AuthSource
       request = Net::HTTP::Get.new(uri.path)
       http.use_ssl = true
       http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      request.body = @payload
-      request.add_field('X-Koha-Date', date)
-      request.add_field('Authorization', auth_header)
-      request.add_field('Cache-Control', 'no-cache')
+      add_body_and_headers(request, @payload, date, auth_header)
       http.request(request)
     rescue Exception => e
       logger.debug(e.inspect)
       uri = get_valid_uri('http', @uristring, @rest_path)
       http = Net::HTTP.new(uri.host, uri.port)
       request = Net::HTTP::Get.new(uri.path)
-      request.body = @payload
-      request.add_field('X-Koha-Date', date)
-      request.add_field('Authorization', auth_header)
-      request.add_field('Cache-Control', 'no-cache')
+      add_body_and_headers(request, @payload, date, auth_header)
       http.request(request)
     end
 
@@ -143,8 +167,17 @@ class AuthSourceKoha < AuthSource
   def get_valid_uri(protocol, uristring, rest_path)
     @protocol = protocol + '://'
     @uri = URI(@protocol + uristring + rest_path)
-    return @uri
+    @uri
   end
+
+  def add_body_and_headers(request, payload, date, auth_header)
+    request.body = payload
+    request.add_field('X-Koha-Date', date)
+    request.add_field('Authorization', auth_header)
+    request.add_field('Cache-Control', 'no-cache')
+  end
+
+  private :rest_api_call, :get_valid_uri, :add_body_and_headers
 
 end
 

@@ -2,7 +2,7 @@ require 'user'
 module SSOKoha
   module Patches
   # Patches or modifies Redmine core dynamically
-    module UserPatch
+    module UserSSOKohaPatch
       def self.included(base) # :nodoc:
         base.extend(ClassMethods)
         base.send(:include, InstanceMethods)
@@ -40,6 +40,6 @@ module SSOKoha
   end
 end
 
-unless User.included_modules.include? SSOKoha::Patches::UserPatch
-  User.send(:include, SSOKoha::Patches::UserPatch)
+unless User.included_modules.include? SSOKoha::Patches::UserSSOKohaPatch
+  User.send(:include, SSOKoha::Patches::UserSSOKohaPatch)
 end

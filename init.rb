@@ -1,6 +1,6 @@
 Rails.application.config.to_prepare do
   require_dependency 'patches/account_controller_patch'
-  require_dependency 'patches/user_patch'
+  require_dependency 'patches/user_sso_koha_patch'
 end
 
 require 'redmine'
